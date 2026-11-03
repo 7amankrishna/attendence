@@ -7,9 +7,20 @@ define('DB_NAME', 'if0_XXXXXXXX_rollflow');
 define('DB_USER', 'if0_XXXXXXXX');
 define('DB_PASS', 'YOUR_HOSTING_ACCOUNT_PASSWORD');
 
-// If frontend and API use the same domain, leave this as '*'.
-// For a separate frontend domain, use its full origin, e.g. https://example.com
-define('ALLOWED_ORIGIN', '*');
+// Add every frontend that may call this API. Include the Vercel production URL,
+// the InfinityFree domain, and localhost during development.
+define('ALLOWED_ORIGINS', [
+    'http://localhost:5173',
+    'https://your-project.vercel.app',
+    'https://your-site.infinityfreeapp.com'
+]);
+
+function corsOrigin(): string {
+    $origin = $_SERVER['HTTP_ORIGIN'] ?? '';
+    if (in_array('*', ALLOWED_ORIGINS, true)) return '*';
+    if ($origin && in_array($origin, ALLOWED_ORIGINS, true)) return $origin;
+    return ALLOWED_ORIGINS[0] ?? '';
+}
 
 function db(): PDO {
     static $pdo = null;
@@ -27,7 +38,8 @@ function db(): PDO {
 function jsonResponse(array $data, int $status = 200): void {
     http_response_code($status);
     header('Content-Type: application/json; charset=utf-8');
-    header('Access-Control-Allow-Origin: ' . ALLOWED_ORIGIN);
+    header('Access-Control-Allow-Origin: ' . corsOrigin());
+    header('Vary: Origin');
     header('Access-Control-Allow-Headers: Content-Type');
     header('Access-Control-Allow-Methods: GET, POST, OPTIONS');
     echo json_encode($data, JSON_UNESCAPED_UNICODE);

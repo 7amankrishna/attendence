@@ -19,6 +19,10 @@ RollFlow is a teacher-first attendance tracker. Instead of showing an overwhelmi
 - Google Sheets OAuth connection
 - Import students from an existing Sheet
 - Permission-aware attendance updates with a success dialog
+- Ordered three-copy backup: Supabase → InfinityFree MySQL → Google Sheets
+- Shared Sync ID for cross-database troubleshooting
+- Automatic backup after each attendance mark
+- Vercel and InfinityFree deployment support
 
 ## Project structure
 
@@ -26,7 +30,11 @@ RollFlow is a teacher-first attendance tracker. Instead of showing an overwhelmi
 frontend/        React + Vite application
 backend/api/     PHP endpoints for InfinityFree
 database/        MySQL setup file
+supabase/        Supabase backup-table setup
+vercel.json      Vercel build and SPA routing
 ```
+
+For complete deployment instructions, read [DEPLOYMENT-GUIDE.md](DEPLOYMENT-GUIDE.md).
 
 ## Run locally
 
@@ -133,7 +141,7 @@ Create a tab called `Students` (or put this data in the first tab) with headers:
 
 The teacher clicks **Connect Google Sheet**, pastes the Sheet URL, and signs in. RollFlow imports the students. When attendance is saved, the app creates or updates an `Attendance` tab containing:
 
-| Date | Roll No | Student Name | Status | Updated At |
-|---|---|---|---|---|
+| Date | Roll No | Student Name | Status | Updated At | Sync ID |
+|---|---|---|---|---|---|
 
 The update is an upsert by `Date + Roll No`, so saving again changes the existing record instead of creating a duplicate. If the signed-in Google account only has view access, RollFlow shows a permission error and does not claim that the update succeeded.

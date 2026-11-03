@@ -25,10 +25,12 @@ CREATE TABLE attendance_records (
   attendance_date DATE NOT NULL,
   status ENUM('present','absent','late','excused') NOT NULL,
   note VARCHAR(255) DEFAULT NULL,
+  sync_id CHAR(36) DEFAULT NULL,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   UNIQUE KEY one_record_per_day (class_id, student_id, attendance_date),
   KEY class_date_lookup (class_id, attendance_date),
+  KEY attendance_sync_lookup (sync_id),
   CONSTRAINT fk_attendance_class FOREIGN KEY (class_id) REFERENCES classes(id) ON DELETE CASCADE,
   CONSTRAINT fk_attendance_student FOREIGN KEY (student_id) REFERENCES students(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

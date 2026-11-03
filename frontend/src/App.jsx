@@ -1,5 +1,6 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { api } from './api'
+import { saveThreeCopies } from './syncManager'
 import {
   extractSpreadsheetId,
   importStudentsFromSheet,
@@ -63,6 +64,9 @@ function App() {
   const [sheetBusy, setSheetBusy] = useState(false)
   const [sheetError, setSheetError] = useState('')
   const [successDialog, setSuccessDialog] = useState(null)
+  const [autoBackup, setAutoBackup] = useState(true)
+  const [syncState, setSyncState] = useState('idle')
+  const backupQueue = useRef(Promise.resolve())
 
   const pageSize = rows * cols
 
@@ -114,6 +118,26 @@ function App() {
     const indexOnPage = visible.findIndex(s => s.id === student.id)
     if (indexOnPage === visible.length - 1 && page < totalPages - 1) {
       setTimeout(() => setPage(p => p + 1), 220)
+    }
+    if (autoBackup) {
+      const oneMark = { [student.id]: status }
+      setSyncState('syncing')
+      backupQueue.current = backupQueue.current.then(async () => {
+        const report = await saveThreeCopies({
+          classId: 1,
+          date,
+          students: [student],
+          marks: oneMark,
+          sheetConnection
+        })
+        const complete = report.results.every(result => result.status === 'success')
+        setSyncState(complete ? 'complete' : 'warning')
+        setMessage(complete ? `${student.name}: 3 backups saved` : `${student.name}: backup needs attention`)
+        setTimeout(() => setMessage(''), 1800)
+      }).catch(error => {
+        setSyncState('warning')
+        setMessage(error.message)
+      })
     }
   }
 
@@ -183,16 +207,20 @@ function App() {
     if (markedCount < students.length && !confirm(`${students.length - markedCount} students are still unmarked. Save anyway?`)) return
     setSaving(true)
     try {
-      if (demoMode) {
-        await new Promise(r => setTimeout(r, 650))
-        setMessage('Demo saved locally — connect the PHP API for MySQL storage')
-      } else {
-        const records = Object.entries(marks).map(([student_id, status]) => ({ student_id: Number(student_id), status }))
-        await api.saveAttendance(1, date, records)
-        setMessage('Attendance saved to MySQL')
-      }
-      if (sheetConnection) await syncGoogleSheet()
+      setSyncState('syncing')
+      const report = await saveThreeCopies({ classId: 1, date, students, marks, sheetConnection })
+      const complete = report.results.every(result => result.status === 'success')
+      setSyncState(complete ? 'complete' : 'warning')
+      setSuccessDialog({
+        title: complete ? 'Three backups created successfully' : 'Attendance saved with backup warnings',
+        detail: complete
+          ? 'Supabase, InfinityFree MySQL and Google Sheets now contain the same attendance records.'
+          : 'Some destinations could not be updated. The successful copies are safe; check the details below.',
+        results: report.results,
+        syncId: report.syncId
+      })
     } catch (e) {
+      setSyncState('warning')
       setMessage(e.message)
     } finally {
       setSaving(false)
@@ -238,11 +266,16 @@ function App() {
           <div><span className="eyebrow">TUESDAY · MORNING SESSION</span><h1>{panel === 'mark' ? 'Attendance, without the crowd.' : 'Five days. One clear picture.'}</h1></div>
           <div className="top-actions">
             {demoMode && <span className="demo-badge">Demo data</span>}
+            <label className="auto-backup" title="Write Supabase, MySQL and Google Sheets after every mark">
+              <input type="checkbox" checked={autoBackup} onChange={e => setAutoBackup(e.target.checked)} />
+              <span>Auto 3-copy backup</span>
+            </label>
+            <span className={`sync-indicator ${syncState}`}><i />{syncState === 'syncing' ? 'Syncing' : syncState === 'complete' ? '3 copies safe' : syncState === 'warning' ? 'Check backup' : 'Ready'}</span>
             <button className={`sheets-btn ${sheetConnection ? 'connected' : ''}`} onClick={() => setSheetModal(true)}>
               <span className="sheets-icon">▦</span>{sheetConnection ? sheetConnection.title : 'Connect Google Sheet'}
             </button>
             <input type="date" value={date} onChange={e => setDate(e.target.value)} />
-            <button className="save-btn" onClick={save} disabled={saving}>{saving ? 'Saving…' : 'Save attendance'}</button>
+            <button className="save-btn" onClick={save} disabled={saving}>{saving ? 'Saving 3 copies…' : 'Save all backups'}</button>
           </div>
         </header>
 
@@ -337,9 +370,17 @@ function App() {
 
       {successDialog && <div className="modal-backdrop success-layer">
         <section className="success-dialog" role="alertdialog" aria-modal="true">
-          <div className="success-check">✓</div>
+          <div className={`success-check ${successDialog.results?.some(r => r.status !== 'success') ? 'warning' : ''}`}>{successDialog.results?.some(r => r.status !== 'success') ? '!' : '✓'}</div>
           <h2>{successDialog.title}</h2>
           <p>{successDialog.detail}</p>
+          {successDialog.results && <div className="backup-results">
+            {successDialog.results.map(result => <div className={result.status} key={result.id}>
+              <span>{result.status === 'success' ? '✓' : result.status === 'skipped' ? '–' : '!'}</span>
+              <b>{result.label}</b>
+              <small>{result.message}</small>
+            </div>)}
+          </div>}
+          {successDialog.syncId && <code className="sync-id">Sync ID: {successDialog.syncId}</code>}
           <button className="save-btn" onClick={() => {setSuccessDialog(null);setSheetModal(false)}}>Done</button>
         </section>
       </div>}

@@ -128,12 +128,12 @@ async function ensureAttendanceSheet(spreadsheetId, token, info) {
   return 'Attendance'
 }
 
-export async function updateAttendanceSheet({ spreadsheetId, token, date, students, marks }) {
+export async function updateAttendanceSheet({ spreadsheetId, token, date, students, marks, syncId = '' }) {
   const info = await getSpreadsheetInfo(spreadsheetId, token)
   const sheetName = await ensureAttendanceSheet(spreadsheetId, token, info)
-  const range = encodeURIComponent(`${quoteSheetName(sheetName)}!A:E`)
+  const range = encodeURIComponent(`${quoteSheetName(sheetName)}!A:F`)
   const current = await apiRequest(`${spreadsheetId}/values/${range}?majorDimension=ROWS`, token)
-  const header = ['Date', 'Roll No', 'Student Name', 'Status', 'Updated At']
+  const header = ['Date', 'Roll No', 'Student Name', 'Status', 'Updated At', 'Sync ID']
   const existingRows = (current.values || []).slice(1)
   const byKey = new Map(existingRows.map(row => [`${row[0]}::${row[1]}`, row]))
   const updatedAt = new Date().toISOString()
@@ -141,13 +141,13 @@ export async function updateAttendanceSheet({ spreadsheetId, token, date, studen
   students.forEach(student => {
     const status = marks[student.id]
     if (!status) return
-    byKey.set(`${date}::${student.roll_no}`, [date, student.roll_no, student.name, status, updatedAt])
+    byKey.set(`${date}::${student.roll_no}`, [date, student.roll_no, student.name, status, updatedAt, syncId])
   })
 
   const values = [header, ...Array.from(byKey.values()).sort((a, b) => `${b[0]}${a[1]}`.localeCompare(`${a[0]}${b[1]}`))]
   await apiRequest(`${spreadsheetId}/values/${range}?valueInputOption=USER_ENTERED`, token, {
     method: 'PUT',
-    body: JSON.stringify({ range: `${sheetName}!A:E`, majorDimension: 'ROWS', values })
+    body: JSON.stringify({ range: `${sheetName}!A:F`, majorDimension: 'ROWS', values })
   })
   return { spreadsheetTitle: info.title, updated: students.filter(s => marks[s.id]).length }
 }
