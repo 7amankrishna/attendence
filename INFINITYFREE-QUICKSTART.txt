@@ -1,0 +1,25 @@
+ROLLFLOW — INFINITYFREE QUICK START
+
+1. Control Panel > MySQL Databases: create a database.
+2. phpMyAdmin > Import: choose database/setup.sql.
+3. Copy backend/api/config.example.php to config.php.
+4. Put the exact InfinityFree MySQL details in config.php.
+   IMPORTANT: use the sqlXXX.infinityfree.com hostname, not localhost.
+5. On your computer run:
+      cd frontend
+      npm install
+      npm run build
+6. Upload the CONTENTS of frontend/dist to your htdocs folder.
+7. Upload backend/api as htdocs/api.
+8. Open https://YOUR-DOMAIN/api/health.php to test.
+9. Open your main domain and take attendance.
+
+OPTIONAL GOOGLE SHEETS
+- Enable Google Sheets API in Google Cloud Console.
+- Create a Web OAuth Client ID.
+- Add your InfinityFree domain as an Authorized JavaScript origin.
+- Put the Client ID in frontend/.env as VITE_GOOGLE_CLIENT_ID.
+- Run npm run build again and re-upload the new dist files.
+- Your Sheet needs Roll No and Student Name columns.
+
+Full explanations are in README.md.
