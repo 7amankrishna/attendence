@@ -23,6 +23,8 @@ RollFlow is a teacher-first attendance tracker. Instead of showing an overwhelmi
 - Shared Sync ID for cross-database troubleshooting
 - Automatic backup after each attendance mark
 - Vercel and InfinityFree deployment support
+- College attendance-matrix auto-detection, including misspelled headers
+- 10-digit System ID/Roll No inference, section filtering and attendance totals
 
 ## Project structure
 
@@ -147,3 +149,16 @@ The teacher clicks **Connect Google Sheet**, pastes the Sheet URL, and signs in.
 |---|---|---|---|---|---|
 
 The update is an upsert by `Date + Roll No`, so saving again changes the existing record instead of creating a duplicate. If the signed-in Google account only has view access, RollFlow shows a permission error and does not claim that the update succeeded.
+
+### Existing college attendance sheets
+
+RollFlow also imports matrix-style attendance workbooks. It uses the `gid` in the pasted Google Sheets URL to select the intended batch tab and automatically detects:
+
+- `NAME`, `Student Name` or similar name columns
+- `SYSTEM ID`, the common misspelling `SYSTME ID`, and 10-digit ID columns
+- `ROLL NO` or another independent 10-digit roll-number column
+- `MAIL ID`, `Email` and email-shaped values
+- `SECTION`, `Batch` and percentage columns
+- Date columns containing Present, Absent, Late or Excused values
+
+It calculates total attended sessions and percentage from the detected attendance cells, shows the five most recent sessions, and creates a section filter. This supports Sharda-style sheets where System IDs and roll numbers are 10 digits.

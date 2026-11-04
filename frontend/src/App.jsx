@@ -3,7 +3,7 @@ import { api } from './api'
 import { saveThreeCopies } from './syncManager'
 import {
   consumeGoogleRedirect,
-  extractSpreadsheetId,
+  extractSpreadsheetReference,
   importStudentsFromSheet,
   startGoogleRedirect,
   updateAttendanceSheet
@@ -67,11 +67,14 @@ function App() {
   const [successDialog, setSuccessDialog] = useState(null)
   const [autoBackup, setAutoBackup] = useState(true)
   const [syncState, setSyncState] = useState('idle')
+  const [sectionFilter, setSectionFilter] = useState('all')
+  const [classInfo, setClassInfo] = useState({ title: 'B.Tech CSE — H(G1)', sections: [] })
   const backupQueue = useRef(Promise.resolve())
 
   const pageSize = rows * cols
 
   useEffect(() => {
+    if (sheetConnection) return
     async function load() {
       try {
         const [studentData, attendanceData, historyData] = await Promise.all([
@@ -91,13 +94,14 @@ function App() {
       }
     }
     load()
-  }, [date])
+  }, [date, sheetConnection])
 
   const filtered = useMemo(() => students.filter(s => {
-    const matchesSearch = `${s.name} ${s.roll_no}`.toLowerCase().includes(query.toLowerCase())
+    const matchesSearch = `${s.name} ${s.roll_no} ${s.system_id || ''} ${s.university_roll_no || ''} ${s.email || ''} ${s.section || ''}`.toLowerCase().includes(query.toLowerCase())
     const matchesFilter = filter === 'all' || (filter === 'unmarked' ? !marks[s.id] : marks[s.id] === filter)
-    return matchesSearch && matchesFilter
-  }), [students, query, filter, marks])
+    const matchesSection = sectionFilter === 'all' || s.section === sectionFilter
+    return matchesSearch && matchesFilter && matchesSection
+  }), [students, query, filter, sectionFilter, marks])
 
   const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize))
   const visible = filtered.slice(page * pageSize, page * pageSize + pageSize)
@@ -158,9 +162,9 @@ function App() {
     setSheetBusy(true)
     setSheetError('')
     try {
-      const spreadsheetId = extractSpreadsheetId(sheetUrl)
+      const { spreadsheetId, preferredSheetId } = extractSpreadsheetReference(sheetUrl)
       localStorage.setItem('rollflow_sheet_url', sheetUrl)
-      startGoogleRedirect(spreadsheetId)
+      startGoogleRedirect(spreadsheetId, preferredSheetId)
     } catch (error) {
       setSheetError(error.message)
       setSheetBusy(false)
@@ -179,16 +183,21 @@ function App() {
     if (!authorization) return
 
     setSheetBusy(true)
-    importStudentsFromSheet(authorization.spreadsheetId, authorization.token).then(imported => {
+    importStudentsFromSheet(authorization.spreadsheetId, authorization.token, authorization.preferredSheetId).then(imported => {
       setSheetConnection({
         spreadsheetId: authorization.spreadsheetId,
         token: authorization.token,
         title: imported.info.title,
-        sourceSheet: imported.sourceSheet
+        sourceSheet: imported.sourceSheet,
+        sourceSheetId: imported.sourceSheetId,
+        detectedColumns: imported.detectedColumns,
+        sections: imported.sections
       })
       setStudents(imported.students)
-      setHistory([])
-      setDates([])
+      setHistory(imported.students.map(student => ({ student_id: student.id, statuses: student.recent_statuses })))
+      setDates(imported.recentLabels)
+      setClassInfo({ title: imported.sourceSheet, sections: imported.sections })
+      setSectionFilter('all')
       setMarks({})
       setPage(0)
       setDemoMode(true)
@@ -274,8 +283,8 @@ function App() {
         </nav>
         <div className="class-card">
           <span className="eyebrow">ACTIVE CLASS</span>
-          <strong>B.Tech CSE — H(G1)</strong>
-          <small>Computer Networks · Room 204</small>
+          <strong>{classInfo.title}</strong>
+          <small>{classInfo.sections.length ? `Sections ${classInfo.sections.join(', ')}` : 'Google Sheets class data'}</small>
           <div className="class-meta"><span>{students.length} students</span><span>09:00 AM</span></div>
         </div>
         <div className="teacher"><span className="avatar small">AK</span><div><strong>Aman Krishna</strong><small>Teacher view</small></div><button>•••</button></div>
@@ -313,6 +322,10 @@ function App() {
             <div className="filter-tabs">
               {['all','unmarked','present','absent','late'].map(x => <button key={x} className={filter === x ? 'active' : ''} onClick={() => {setFilter(x);setPage(0)}}>{x}</button>)}
             </div>
+            {classInfo.sections.length > 0 && <select className="section-select" value={sectionFilter} onChange={e => {setSectionFilter(e.target.value);setPage(0)}}>
+              <option value="all">All sections</option>
+              {classInfo.sections.map(section => <option value={section} key={section}>Section {section}</option>)}
+            </select>}
             <button className="undo" disabled={!undo.length} onClick={undoLast}>↶ Undo</button>
           </section>
 
@@ -329,9 +342,13 @@ function App() {
 
             <div className="student-grid" style={{gridTemplateColumns:`repeat(${cols}, minmax(0, 1fr))`}}>
               {visible.map((student, index) => <article className={`student-card ${marks[student.id] || ''}`} key={student.id}>
-                <div className="student-top"><span className="position">{page * pageSize + index + 1}</span><span className="avatar">{initials(student.name)}</span><span className="roll">{student.roll_no}</span></div>
+                <div className="student-top"><span className="position">{page * pageSize + index + 1}</span><span className="avatar">{initials(student.name)}</span><span className="roll">{student.system_id || student.roll_no}</span></div>
                 <h3>{student.name}</h3>
-                <div className="mini-history"><span>Last 5</span>{(history.find(h => Number(h.student_id) === Number(student.id))?.statuses || []).map((s,i) => <StatusDot key={i} status={s} />)}</div>
+                {(student.section || student.attendance) && <div className="student-summary">
+                  <span>{student.section ? `Section ${student.section}` : 'Imported student'}</span>
+                  {student.attendance && <strong>{student.attendance.percentage}% <small>{student.attendance.present}/{student.attendance.total}</small></strong>}
+                </div>}
+                <div className="mini-history"><span>Last 5</span>{(history.find(h => String(h.student_id) === String(student.id))?.statuses || []).map((s,i) => <StatusDot key={i} status={s} />)}</div>
                 <div className="mark-actions">
                   {Object.entries(STATUS).map(([key, info]) => <button key={key} className={marks[student.id] === key ? 'selected' : ''} onClick={() => markStudent(student,key)} title={`${info.label} (${info.key})`}><span>{info.icon}</span><small>{info.label}</small></button>)}
                 </div>
@@ -360,7 +377,7 @@ function App() {
 
           {sheetConnection ? <div className="connected-sheet">
             <span className="connection-dot" />
-            <div><b>{sheetConnection.title}</b><small>Import tab: {sheetConnection.sourceSheet} · Attendance tab: Attendance</small></div>
+            <div><b>{sheetConnection.sourceSheet}</b><small>{students.length} students · {sheetConnection.sections?.length || 0} sections · {sheetConnection.detectedColumns?.attendanceSessions || 0} attendance sessions detected</small></div>
           </div> : <>
             <label className="sheet-field">Google Sheet link
               <input value={sheetUrl} onChange={e => setSheetUrl(e.target.value)} placeholder="https://docs.google.com/spreadsheets/d/…" />
@@ -410,9 +427,9 @@ function App() {
 
 function ProgressView({ students, history, dates }) {
   const rows = students.map(s => {
-    const statuses = history.find(h => Number(h.student_id) === Number(s.id))?.statuses || []
+    const statuses = history.find(h => String(h.student_id) === String(s.id))?.statuses || []
     const attended = statuses.filter(x => x === 'present' || x === 'late').length
-    return { ...s, statuses, rate: statuses.length ? Math.round(attended / statuses.length * 100) : 0 }
+    return { ...s, statuses, rate: s.attendance?.percentage ?? (statuses.length ? Math.round(attended / statuses.length * 100) : 0) }
   }).sort((a,b) => a.rate - b.rate)
 
   return <section className="progress-panel">

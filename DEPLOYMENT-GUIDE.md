@@ -105,6 +105,8 @@ The student spreadsheet should contain a `Students` tab with these headers:
 
 RollFlow creates/updates an `Attendance` tab. The sixth column stores the common Sync ID.
 
+Existing college matrix sheets are also supported. Paste the complete URL containing `gid=...`; RollFlow selects that tab, detects misspelled/profile headers, identifies 10-digit System ID and Roll No columns from their values, groups sections, and totals the Present/Absent session columns automatically.
+
 ## Deploy the frontend to Vercel
 
 1. Push the repository to GitHub (already done for this project).
