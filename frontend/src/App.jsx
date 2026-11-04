@@ -4,7 +4,9 @@ import { saveThreeCopies } from './syncManager'
 import {
   consumeGoogleRedirect,
   extractSpreadsheetReference,
+  fetchGoogleProfile,
   importStudentsFromSheet,
+  startGoogleLoginRedirect,
   startGoogleRedirect,
   updateAttendanceSheet
 } from './googleSheets'
@@ -42,12 +44,35 @@ function todayISO() {
   return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0,10)
 }
 
+function readSavedUser() {
+  try {
+    return JSON.parse(localStorage.getItem('rollflow_user') || sessionStorage.getItem('rollflow_guest') || 'null')
+  } catch {
+    return null
+  }
+}
+
+function roleFromEmail(email) {
+  const value = String(email || '').trim().toLowerCase()
+  if (value.endsWith('@ug.sharda.ac.in')) return 'student'
+  if (value.endsWith('@sharda.ac.in')) return 'teacher'
+  return 'guest'
+}
+
+function roleName(role) {
+  return role === 'teacher' ? 'Teacher' : role === 'student' ? 'Student' : 'Guest'
+}
+
 function StatusDot({ status }) {
   const info = HISTORY_STATUS[status]
   return <span className={`day-dot ${status || 'empty'}`} title={info?.label || 'No record'}>{info?.icon || '·'}</span>
 }
 
 function App() {
+  const [authUser, setAuthUser] = useState(readSavedUser)
+  const [authChecking, setAuthChecking] = useState(true)
+  const [authBusy, setAuthBusy] = useState(false)
+  const [authError, setAuthError] = useState('')
   const [students, setStudents] = useState([])
   const [marks, setMarks] = useState({})
   const [history, setHistory] = useState([])
@@ -81,7 +106,7 @@ function App() {
   const pageSize = rows * cols
 
   useEffect(() => {
-    if (sheetConnection) return
+    if (authChecking || !authUser || sheetConnection) return
     async function load() {
       try {
         const [studentData, attendanceData, historyData] = await Promise.all([
@@ -101,7 +126,7 @@ function App() {
       }
     }
     load()
-  }, [date, sheetConnection])
+  }, [date, sheetConnection, authChecking, authUser])
 
   const filtered = useMemo(() => students.filter(s => {
     const matchesSearch = `${s.name} ${s.roll_no} ${s.system_id || ''} ${s.university_roll_no || ''} ${s.email || ''} ${s.section || ''}`.toLowerCase().includes(query.toLowerCase())
@@ -168,6 +193,33 @@ function App() {
     setUndo(old => old.slice(0, -1))
   }
 
+  function loginWithGoogle() {
+    setAuthBusy(true)
+    setAuthError('')
+    try {
+      startGoogleLoginRedirect()
+    } catch (error) {
+      setAuthError(error.message)
+      setAuthBusy(false)
+    }
+  }
+
+  function skipLogin() {
+    const guest = { name: 'Guest', email: '', picture: '', role: 'guest', skipped: true }
+    sessionStorage.setItem('rollflow_guest', JSON.stringify(guest))
+    setAuthUser(guest)
+    setAuthError('')
+  }
+
+  function signOut() {
+    localStorage.removeItem('rollflow_user')
+    sessionStorage.removeItem('rollflow_guest')
+    setAuthUser(null)
+    setSheetConnection(null)
+    setAuthError('')
+    setLoading(true)
+  }
+
   async function connectSheet() {
     setSheetBusy(true)
     setSheetError('')
@@ -203,6 +255,7 @@ function App() {
     setFilter('all')
     setPage(0)
     setDemoMode(true)
+    setLoading(false)
   }
 
   async function switchBatch(sheetId) {
@@ -231,11 +284,30 @@ function App() {
     try {
       authorization = consumeGoogleRedirect()
     } catch (error) {
-      setSheetModal(true)
-      setSheetError(error.message)
+      setAuthError(error.message)
+      setAuthChecking(false)
       return
     }
-    if (!authorization) return
+    if (!authorization) {
+      setAuthChecking(false)
+      return
+    }
+
+    if (authorization.flow === 'login') {
+      setAuthBusy(true)
+      fetchGoogleProfile(authorization.token).then(profile => {
+        const user = { ...profile, role: roleFromEmail(profile.email), skipped: false }
+        sessionStorage.removeItem('rollflow_guest')
+        localStorage.setItem('rollflow_user', JSON.stringify(user))
+        setAuthUser(user)
+      }).catch(error => {
+        setAuthError(error.message)
+      }).finally(() => {
+        setAuthBusy(false)
+        setAuthChecking(false)
+      })
+      return
+    }
 
     setSheetBusy(true)
     importStudentsFromSheet(authorization.spreadsheetId, authorization.token, authorization.preferredSheetId).then(imported => {
@@ -252,6 +324,7 @@ function App() {
       setSheetError(error.message)
     }).finally(() => {
       setSheetBusy(false)
+      setAuthChecking(false)
     })
   }, [])
 
@@ -312,6 +385,8 @@ function App() {
     return () => window.removeEventListener('keydown', onKey)
   })
 
+  if (authChecking) return <div className="loading"><div className="loader-ring"/><p>Checking your Google session…</p></div>
+  if (!authUser) return <LoginPage busy={authBusy} error={authError} onGoogle={loginWithGoogle} onSkip={skipLogin} />
   if (loading) return <div className="loading"><div className="loader-ring"/><p>Preparing your class…</p></div>
 
   return (
@@ -329,12 +404,16 @@ function App() {
           <small>{classInfo.sections.length ? `Sections ${classInfo.sections.join(', ')}` : 'Google Sheets class data'}</small>
           <div className="class-meta"><span>{activeStudents.length} active · {students.length - activeStudents.length} removed</span><span>09:00 AM</span></div>
         </div>
-        <div className="teacher"><span className="avatar small">AK</span><div><strong>Aman Krishna</strong><small>Teacher view</small></div><button>•••</button></div>
+        <div className="teacher">
+          {authUser.picture ? <img className="avatar small user-photo" src={authUser.picture} alt="" referrerPolicy="no-referrer" /> : <span className="avatar small">{initials(authUser.name)}</span>}
+          <div><strong>{authUser.name}</strong><small>{roleName(authUser.role)} view</small></div>
+          <button onClick={signOut} title="Sign out" aria-label="Sign out">↪</button>
+        </div>
       </aside>
 
       <main>
         <header className="topbar">
-          <div><span className="eyebrow">TUESDAY · MORNING SESSION</span><h1>{panel === 'mark' ? 'Attendance, without the crowd.' : 'Five days. One clear picture.'}</h1></div>
+          <div><span className="eyebrow">WELCOME AS A {roleName(authUser.role).toUpperCase()}</span><h1>{panel === 'mark' ? `Welcome, ${authUser.name.split(' ')[0]}.` : 'Five days. One clear picture.'}</h1></div>
           <div className="top-actions">
             {demoMode && <span className="demo-badge">Demo data</span>}
             <label className="auto-backup" title="Write Supabase, MySQL and Google Sheets after every mark">
@@ -345,6 +424,7 @@ function App() {
             <button className={`sheets-btn ${sheetConnection ? 'connected' : ''}`} onClick={() => setSheetModal(true)}>
               <span className="sheets-icon">▦</span>{sheetConnection ? sheetConnection.title : 'Connect Google Sheet'}
             </button>
+            <button className="mobile-signout" onClick={signOut} title="Sign out">Sign out</button>
             <input type="date" value={date} onChange={e => setDate(e.target.value)} />
             <button className="save-btn" onClick={save} disabled={saving}>{saving ? 'Saving 3 copies…' : 'Save all backups'}</button>
           </div>
@@ -481,6 +561,45 @@ function App() {
       </div>}
     </div>
   )
+}
+
+function LoginPage({ busy, error, onGoogle, onSkip }) {
+  return <main className="login-page">
+    <section className="login-visual" aria-hidden="true">
+      <div className="login-brand"><span className="brand-mark">R</span><span>RollFlow</span></div>
+      <div className="login-message">
+        <span className="eyebrow">SHARDA ATTENDANCE, SIMPLIFIED</span>
+        <h1>Know the room.<br/>Mark the moment.</h1>
+        <p>One calm place for batches, five-day progress and reliable attendance backups.</p>
+      </div>
+      <div className="login-preview">
+        <span>Today’s class</span>
+        <strong>5 students at a time</strong>
+        <div><i/><i/><i/><i/><i/></div>
+      </div>
+    </section>
+
+    <section className="login-panel">
+      <div className="login-card">
+        <span className="eyebrow">WELCOME TO ROLLFLOW</span>
+        <h2>Continue with your Google account</h2>
+        <p>Your Sharda email automatically sets up the correct experience.</p>
+
+        <div className="role-rules">
+          <div><span>ST</span><p><b>Student</b><small>@ug.sharda.ac.in</small></p></div>
+          <div><span>TR</span><p><b>Teacher</b><small>@sharda.ac.in</small></p></div>
+        </div>
+
+        {error && <div className="login-error">{error}</div>}
+
+        <button className="google-login-btn" onClick={onGoogle} disabled={busy}>
+          <span>G</span>{busy ? 'Opening Google…' : 'Continue with Google'}
+        </button>
+        <button className="skip-login-btn" onClick={onSkip} disabled={busy}>Skip for now</button>
+        <small className="login-privacy">Google is the only sign-in provider. RollFlow reads your name and email only to identify your role.</small>
+      </div>
+    </section>
+  </main>
 }
 
 function ProgressView({ students, history, dates }) {

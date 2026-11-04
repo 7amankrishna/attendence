@@ -1,4 +1,5 @@
 const SHEETS_SCOPE = 'https://www.googleapis.com/auth/spreadsheets'
+const LOGIN_SCOPE = 'openid email profile'
 const API_BASE = 'https://sheets.googleapis.com/v4/spreadsheets'
 
 function isValidGoogleClientId(value) {
@@ -20,24 +21,35 @@ function randomState() {
   return Array.from(bytes, byte => byte.toString(16).padStart(2, '0')).join('')
 }
 
-export function startGoogleRedirect(spreadsheetId, preferredSheetId = null) {
+function beginGoogleRedirect(scope, flow, prompt = 'select_account') {
   const clientId = requireClientId()
   const state = randomState()
   const redirectUri = `${window.location.origin}/`
   sessionStorage.setItem('rollflow_google_oauth_state', state)
-  sessionStorage.setItem('rollflow_pending_spreadsheet_id', spreadsheetId)
-  if (preferredSheetId !== null) sessionStorage.setItem('rollflow_pending_sheet_gid', String(preferredSheetId))
+  sessionStorage.setItem('rollflow_google_oauth_flow', flow)
 
   const params = new URLSearchParams({
     client_id: clientId,
     redirect_uri: redirectUri,
     response_type: 'token',
-    scope: SHEETS_SCOPE,
+    scope,
     include_granted_scopes: 'true',
-    prompt: 'consent',
+    prompt,
     state
   })
   window.location.assign(`https://accounts.google.com/o/oauth2/v2/auth?${params}`)
+}
+
+export function startGoogleLoginRedirect() {
+  sessionStorage.removeItem('rollflow_pending_spreadsheet_id')
+  sessionStorage.removeItem('rollflow_pending_sheet_gid')
+  beginGoogleRedirect(LOGIN_SCOPE, 'login')
+}
+
+export function startGoogleRedirect(spreadsheetId, preferredSheetId = null) {
+  sessionStorage.setItem('rollflow_pending_spreadsheet_id', spreadsheetId)
+  if (preferredSheetId !== null) sessionStorage.setItem('rollflow_pending_sheet_gid', String(preferredSheetId))
+  beginGoogleRedirect(SHEETS_SCOPE, 'sheet', 'consent')
 }
 
 export function consumeGoogleRedirect() {
@@ -48,17 +60,33 @@ export function consumeGoogleRedirect() {
 
   const expectedState = sessionStorage.getItem('rollflow_google_oauth_state')
   const receivedState = hash.get('state')
+  const flow = sessionStorage.getItem('rollflow_google_oauth_flow') || 'sheet'
   const spreadsheetId = sessionStorage.getItem('rollflow_pending_spreadsheet_id')
   const preferredSheetId = sessionStorage.getItem('rollflow_pending_sheet_gid')
   sessionStorage.removeItem('rollflow_google_oauth_state')
+  sessionStorage.removeItem('rollflow_google_oauth_flow')
   sessionStorage.removeItem('rollflow_pending_spreadsheet_id')
   sessionStorage.removeItem('rollflow_pending_sheet_gid')
   window.history.replaceState({}, document.title, `${window.location.pathname}${window.location.search}`)
 
   if (oauthError) throw new Error(hash.get('error_description') || oauthError)
-  if (!expectedState || receivedState !== expectedState) throw new Error('Google authorization state could not be verified. Please reconnect the Sheet.')
+  if (!expectedState || receivedState !== expectedState) throw new Error('Google authorization state could not be verified. Please try again.')
+  if (flow === 'login') return { flow, token }
   if (!spreadsheetId) throw new Error('The pending Google Sheet could not be found. Please reconnect it.')
-  return { token, spreadsheetId, preferredSheetId: preferredSheetId !== null ? Number(preferredSheetId) : null }
+  return { flow: 'sheet', token, spreadsheetId, preferredSheetId: preferredSheetId !== null ? Number(preferredSheetId) : null }
+}
+
+export async function fetchGoogleProfile(token) {
+  const response = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
+    headers: { Authorization: `Bearer ${token}` }
+  })
+  const profile = await response.json().catch(() => ({}))
+  if (!response.ok || !profile.email) throw new Error(profile.error_description || 'Could not read your Google profile. Please try again.')
+  return {
+    name: profile.name || profile.given_name || profile.email.split('@')[0],
+    email: profile.email,
+    picture: profile.picture || ''
+  }
 }
 
 async function apiRequest(path, token, options = {}) {
