@@ -22,6 +22,8 @@ const HISTORY_STATUS = {
   excused: { label: 'Excused', icon: '–' }
 }
 
+const DEFAULT_SHEET_URL = 'https://docs.google.com/spreadsheets/d/1T6lwj1oNtIaFO_t1O0_iswQjoYHyiw98ywWHZNWVpaY/edit?usp=sharing'
+
 const demoStudents = [
   'Aarav Sharma','Aditi Singh','Aditya Raj','Ananya Verma','Ankit Kumar',
   'Arjun Mehta','Aryan Asthana','Avni Gupta','Deepak Yadav','Diya Roy',
@@ -90,7 +92,7 @@ function App() {
   const [demoMode, setDemoMode] = useState(false)
   const [panel, setPanel] = useState('mark')
   const [sheetModal, setSheetModal] = useState(false)
-  const [sheetUrl, setSheetUrl] = useState(localStorage.getItem('rollflow_sheet_url') || '')
+  const [sheetUrl, setSheetUrl] = useState(localStorage.getItem('rollflow_sheet_url') || DEFAULT_SHEET_URL)
   const [sheetConnection, setSheetConnection] = useState(null)
   const [sheetBusy, setSheetBusy] = useState(false)
   const [sheetError, setSheetError] = useState('')
