@@ -1,21 +1,51 @@
 const SHEETS_SCOPE = 'https://www.googleapis.com/auth/spreadsheets'
 const API_BASE = 'https://sheets.googleapis.com/v4/spreadsheets'
 
-function requireClientId() {
-  const clientId = import.meta.env.VITE_GOOGLE_CLIENT_ID
-  if (!clientId) throw new Error('Google Client ID is not configured. Add VITE_GOOGLE_CLIENT_ID to your .env file.')
+export function isValidGoogleClientId(value) {
+  const clientId = String(value || '').trim()
+  return clientId.length > 30 && clientId.endsWith('.apps.googleusercontent.com') && !clientId.includes('YOUR_CLIENT_ID')
+}
+
+function requireClientId(runtimeClientId) {
+  const clientId = String(runtimeClientId || import.meta.env.VITE_GOOGLE_CLIENT_ID || '').trim()
+  if (!isValidGoogleClientId(clientId)) {
+    throw new Error('Enter a real Google Web OAuth Client ID. “YOUR_CLIENT_ID…” is only a placeholder.')
+  }
   return clientId
 }
 
-function waitForGoogleIdentity() {
+export function isGoogleIdentityReady() {
+  return Boolean(window.google?.accounts?.oauth2)
+}
+
+function popupErrorMessage(error) {
+  if (error?.type === 'popup_failed_to_open') {
+    return 'Your browser blocked the Google popup. Allow popups for this site, then click Continue with Google again.'
+  }
+  if (error?.type === 'popup_closed') {
+    return 'The Google sign-in popup was closed before permission was granted.'
+  }
+  return error?.message || 'Google sign-in could not be completed.'
+}
+
+export function requestGoogleAccess(runtimeClientId) {
+  const clientId = requireClientId(runtimeClientId)
+  if (!isGoogleIdentityReady()) {
+    throw new Error('Google Sign-In is still loading. Wait a moment and try again.')
+  }
   return new Promise((resolve, reject) => {
-    let attempts = 0
-    const check = () => {
-      if (window.google?.accounts?.oauth2) return resolve()
-      if (++attempts > 50) return reject(new Error('Google sign-in could not load. Check your internet connection.'))
-      setTimeout(check, 100)
-    }
-    check()
+    const client = window.google.accounts.oauth2.initTokenClient({
+      client_id: clientId,
+      scope: SHEETS_SCOPE,
+      callback: response => {
+        if (response.error) reject(new Error(response.error_description || response.error))
+        else resolve(response.access_token)
+      },
+      error_callback: error => reject(new Error(popupErrorMessage(error)))
+    })
+    // Keep this call in the original button click stack. Google requires a user
+    // gesture to open the OAuth popup, so do not await timers before this line.
+    client.requestAccessToken({ prompt: 'consent' })
   })
 }
 
@@ -46,23 +76,6 @@ export function extractSpreadsheetId(input) {
   if (match) return match[1]
   if (/^[a-zA-Z0-9-_]{20,}$/.test(value)) return value
   throw new Error('Paste a valid Google Sheets link or spreadsheet ID.')
-}
-
-export async function requestGoogleAccess() {
-  await waitForGoogleIdentity()
-  const clientId = requireClientId()
-  return new Promise((resolve, reject) => {
-    const client = window.google.accounts.oauth2.initTokenClient({
-      client_id: clientId,
-      scope: SHEETS_SCOPE,
-      callback: response => {
-        if (response.error) reject(new Error(response.error_description || response.error))
-        else resolve(response.access_token)
-      },
-      error_callback: error => reject(new Error(error.message || 'Google sign-in was cancelled.'))
-    })
-    client.requestAccessToken({ prompt: 'consent' })
-  })
 }
 
 export async function getSpreadsheetInfo(spreadsheetId, token) {

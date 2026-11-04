@@ -126,8 +126,10 @@ This is suitable for a college project/demo. Before real institutional use, add 
 7. Copy `frontend/.env.example` to `frontend/.env` and add:
 
 ```env
-VITE_GOOGLE_CLIENT_ID=YOUR_CLIENT_ID.apps.googleusercontent.com
+VITE_GOOGLE_CLIENT_ID=123456789-real-value.apps.googleusercontent.com
 ```
+
+Use your real Web OAuth Client ID. The text `YOUR_CLIENT_ID...` is only an example and will be rejected by the app. You can also paste the Client ID in the Google Sheets connection dialog without rebuilding.
 
 Run `npm run build` again after changing the client ID, because Vite places environment values into the compiled frontend.
 

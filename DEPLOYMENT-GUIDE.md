@@ -88,8 +88,10 @@ Do not add a trailing slash.
 6. Add the Client ID to `frontend/.env`:
 
 ```env
-VITE_GOOGLE_CLIENT_ID=YOUR_CLIENT_ID.apps.googleusercontent.com
+VITE_GOOGLE_CLIENT_ID=123456789-real-value.apps.googleusercontent.com
 ```
+
+Do not copy the example literally. It must be the real **Web application** Client ID from Google Cloud. RollFlow also lets you enter this value inside the Connect Google Sheet dialog at runtime.
 
 The student spreadsheet should contain a `Students` tab with these headers:
 
@@ -113,6 +115,16 @@ RollFlow creates/updates an `Attendance` tab. The sixth column stores the common
 6. Deploy.
 7. Add the final Vercel production URL to Google Authorized JavaScript origins and `ALLOWED_ORIGINS` in InfinityFree `config.php`.
 8. Rebuild/redeploy after any Vite environment-variable change.
+
+If your Vercel Root Directory is set to `frontend`, the repository also includes `frontend/vercel.json`. In that case, use the normal commands `npm install` and `npm run build`; do not use `npm install --prefix frontend`, which would incorrectly look for `frontend/frontend/package.json`.
+
+### Google popup troubleshooting
+
+- `YOUR_CLIENT_ID.apps.googleusercontent.com` is a placeholder and cannot authenticate.
+- Create a **Web application** OAuth client, not a Desktop client.
+- Add the exact origin displayed by RollFlow, for example `https://your-app.vercel.app`, to **Authorized JavaScript origins**. Do not add a path or trailing page name.
+- Allow popups for your deployed site.
+- After changing a Vercel environment variable, redeploy because Vite embeds it at build time.
 
 ## Deploy the frontend to InfinityFree
 
