@@ -11,9 +11,13 @@ import {
 
 const STATUS = {
   present: { label: 'Present', key: 'P', icon: '✓' },
-  absent: { label: 'Absent', key: 'A', icon: '×' },
-  late: { label: 'Late', key: 'L', icon: '◷' },
-  excused: { label: 'Excused', key: 'E', icon: '–' }
+  absent: { label: 'Absent', key: 'A', icon: '×' }
+}
+
+const HISTORY_STATUS = {
+  ...STATUS,
+  late: { label: 'Late', icon: '◷' },
+  excused: { label: 'Excused', icon: '–' }
 }
 
 const demoStudents = [
@@ -39,7 +43,8 @@ function todayISO() {
 }
 
 function StatusDot({ status }) {
-  return <span className={`day-dot ${status || 'empty'}`} title={status || 'No record'}>{status ? STATUS[status]?.icon : '·'}</span>
+  const info = HISTORY_STATUS[status]
+  return <span className={`day-dot ${status || 'empty'}`} title={info?.label || 'No record'}>{info?.icon || '·'}</span>
 }
 
 function App() {
@@ -100,23 +105,26 @@ function App() {
 
   const filtered = useMemo(() => students.filter(s => {
     const matchesSearch = `${s.name} ${s.roll_no} ${s.system_id || ''} ${s.university_roll_no || ''} ${s.email || ''} ${s.section || ''}`.toLowerCase().includes(query.toLowerCase())
-    const matchesFilter = filter === 'all' || (filter === 'unmarked' ? !marks[s.id] : marks[s.id] === filter)
+    const matchesFilter = s.removed ? filter === 'all' : filter === 'all' || (filter === 'unmarked' ? !marks[s.id] : marks[s.id] === filter)
     const matchesSection = sectionFilter === 'all' || s.section === sectionFilter
     return matchesSearch && matchesFilter && matchesSection
   }), [students, query, filter, sectionFilter, marks])
 
   const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize))
   const visible = filtered.slice(page * pageSize, page * pageSize + pageSize)
-  const markedCount = Object.keys(marks).length
-  const absentCount = Object.values(marks).filter(x => x === 'absent').length
-  const presentCount = Object.values(marks).filter(x => x === 'present').length
-  const completion = students.length ? Math.round(markedCount / students.length * 100) : 0
+  const activeStudents = students.filter(student => !student.removed)
+  const activeIds = new Set(activeStudents.map(student => String(student.id)))
+  const markedCount = Object.entries(marks).filter(([id]) => activeIds.has(String(id))).length
+  const absentCount = Object.entries(marks).filter(([id, status]) => activeIds.has(String(id)) && status === 'absent').length
+  const presentCount = Object.entries(marks).filter(([id, status]) => activeIds.has(String(id)) && status === 'present').length
+  const completion = activeStudents.length ? Math.round(markedCount / activeStudents.length * 100) : 0
 
   useEffect(() => {
     if (page >= totalPages) setPage(Math.max(0, totalPages - 1))
   }, [totalPages, page])
 
   function markStudent(student, status) {
+    if (student.removed) return
     const previous = marks[student.id]
     setUndo(old => [...old.slice(-9), { id: student.id, previous }])
     setMarks(old => ({ ...old, [student.id]: status }))
@@ -267,7 +275,7 @@ function App() {
   }
 
   async function save() {
-    if (markedCount < students.length && !confirm(`${students.length - markedCount} students are still unmarked. Save anyway?`)) return
+    if (markedCount < activeStudents.length && !confirm(`${activeStudents.length - markedCount} students are still unmarked. Save anyway?`)) return
     setSaving(true)
     try {
       setSyncState('syncing')
@@ -294,9 +302,9 @@ function App() {
   useEffect(() => {
     const onKey = (e) => {
       if (['INPUT','SELECT'].includes(document.activeElement?.tagName)) return
-      const unmarked = visible.find(s => !marks[s.id]) || visible[0]
+      const unmarked = visible.find(s => !s.removed && !marks[s.id]) || visible.find(s => !s.removed)
       if (!unmarked) return
-      const map = { p:'present', a:'absent', l:'late', e:'excused' }
+      const map = { p:'present', a:'absent' }
       if (map[e.key.toLowerCase()]) markStudent(unmarked, map[e.key.toLowerCase()])
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') undoLast()
     }
@@ -319,7 +327,7 @@ function App() {
           <span className="eyebrow">ACTIVE CLASS</span>
           <strong>{classInfo.title}</strong>
           <small>{classInfo.sections.length ? `Sections ${classInfo.sections.join(', ')}` : 'Google Sheets class data'}</small>
-          <div className="class-meta"><span>{students.length} students</span><span>09:00 AM</span></div>
+          <div className="class-meta"><span>{activeStudents.length} active · {students.length - activeStudents.length} removed</span><span>09:00 AM</span></div>
         </div>
         <div className="teacher"><span className="avatar small">AK</span><div><strong>Aman Krishna</strong><small>Teacher view</small></div><button>•••</button></div>
       </aside>
@@ -364,13 +372,13 @@ function App() {
           <section className="summary-strip">
             <div><span className="number">{completion}%</span><span>session complete</span></div>
             <div className="progress-track"><i style={{width: `${completion}%`}} /></div>
-            <div className="summary-numbers"><span><b>{presentCount}</b> present</span><span><b>{absentCount}</b> absent</span><span><b>{students.length - markedCount}</b> left</span></div>
+            <div className="summary-numbers"><span><b>{presentCount}</b> present</span><span><b>{absentCount}</b> absent</span><span><b>{activeStudents.length - markedCount}</b> left</span></div>
           </section>
 
           <section className="control-row">
             <div className="search-wrap"><span>⌕</span><input value={query} onChange={e => {setQuery(e.target.value);setPage(0)}} placeholder="Search name or roll number" /></div>
             <div className="filter-tabs">
-              {['all','unmarked','present','absent','late'].map(x => <button key={x} className={filter === x ? 'active' : ''} onClick={() => {setFilter(x);setPage(0)}}>{x}</button>)}
+              {['all','unmarked','present','absent'].map(x => <button key={x} className={filter === x ? 'active' : ''} onClick={() => {setFilter(x);setPage(0)}}>{x}</button>)}
             </div>
             {classInfo.sections.length > 0 && <select className="section-select" value={sectionFilter} onChange={e => {setSectionFilter(e.target.value);setPage(0)}}>
               <option value="all">All sections</option>
@@ -391,7 +399,7 @@ function App() {
             </div>
 
             <div className="student-grid" style={{gridTemplateColumns:`repeat(${cols}, minmax(0, 1fr))`}}>
-              {visible.map((student, index) => <article className={`student-card ${marks[student.id] || ''}`} key={student.id}>
+              {visible.map((student, index) => <article className={`student-card ${student.removed ? 'removed' : marks[student.id] || ''}`} key={student.id}>
                 <div className="student-top"><span className="position">{page * pageSize + index + 1}</span><span className="avatar">{initials(student.name)}</span><span className="roll">{student.system_id || student.roll_no}</span></div>
                 <h3>{student.name}</h3>
                 {(student.section || student.attendance) && <div className="student-summary">
@@ -399,9 +407,9 @@ function App() {
                   {student.attendance && <strong>{student.attendance.percentage}% <small>{student.attendance.present}/{student.attendance.total}</small></strong>}
                 </div>}
                 <div className="mini-history"><span>Last 5</span>{(history.find(h => String(h.student_id) === String(student.id))?.statuses || []).map((s,i) => <StatusDot key={i} status={s} />)}</div>
-                <div className="mark-actions">
+                {student.removed ? <div className="removed-student-note"><span>×</span><div><b>Removed from batch</b><small>Kept here for attendance history</small></div></div> : <div className="mark-actions">
                   {Object.entries(STATUS).map(([key, info]) => <button key={key} className={marks[student.id] === key ? 'selected' : ''} onClick={() => markStudent(student,key)} title={`${info.label} (${info.key})`}><span>{info.icon}</span><small>{info.label}</small></button>)}
-                </div>
+                </div>}
               </article>)}
               {!visible.length && <div className="empty-state"><b>No students found</b><span>Try a different search or filter.</span></div>}
             </div>
@@ -413,7 +421,7 @@ function App() {
             </div>
           </section>
 
-          <footer className="keyboard-tip"><span>Keyboard</span><kbd>P</kbd> Present <kbd>A</kbd> Absent <kbd>L</kbd> Late <kbd>E</kbd> Excused <kbd>Ctrl Z</kbd> Undo</footer>
+          <footer className="keyboard-tip"><span>Keyboard</span><kbd>P</kbd> Present <kbd>A</kbd> Absent <kbd>Ctrl Z</kbd> Undo</footer>
         </> : <ProgressView students={students} history={history} dates={dates} />}
       </main>
 
@@ -481,19 +489,20 @@ function ProgressView({ students, history, dates }) {
     const attended = statuses.filter(x => x === 'present' || x === 'late').length
     return { ...s, statuses, rate: s.attendance?.percentage ?? (statuses.length ? Math.round(attended / statuses.length * 100) : 0) }
   }).sort((a,b) => a.rate - b.rate)
+  const activeRows = rows.filter(row => !row.removed)
 
   return <section className="progress-panel">
     <div className="insight-row">
-      <article className="insight hero"><span className="eyebrow">NEEDS ATTENTION</span><b>{rows.filter(r => r.rate < 75).length}</b><p>students below 75% in the last five sessions</p></article>
-      <article className="insight"><span>↗</span><div><b>{Math.round(rows.reduce((a,b)=>a+b.rate,0)/Math.max(rows.length,1))}%</b><p>class average</p></div></article>
-      <article className="insight"><span>★</span><div><b>{rows.filter(r=>r.rate===100).length}</b><p>perfect streaks</p></div></article>
+      <article className="insight hero"><span className="eyebrow">NEEDS ATTENTION</span><b>{activeRows.filter(r => r.rate < 75).length}</b><p>active students below 75% in the last five sessions</p></article>
+      <article className="insight"><span>↗</span><div><b>{Math.round(activeRows.reduce((a,b)=>a+b.rate,0)/Math.max(activeRows.length,1))}%</b><p>class average</p></div></article>
+      <article className="insight"><span>★</span><div><b>{activeRows.filter(r=>r.rate===100).length}</b><p>perfect streaks</p></div></article>
     </div>
     <div className="table-card">
       <div className="table-head"><div><span className="eyebrow">STUDENT PULSE</span><h2>Five-day attendance</h2></div><div className="legend"><span><i className="present"/>Present</span><span><i className="late"/>Late</span><span><i className="absent"/>Absent</span></div></div>
       <div className="progress-table">
         <div className="tr header"><span>Student</span>{dates.map(d=><span key={d}>{d}</span>)}<span>Rate</span></div>
-        {rows.map(s => <div className="tr" key={s.id}>
-          <span className="student-cell"><i className="avatar tiny">{initials(s.name)}</i><span><b>{s.name}</b><small>{s.roll_no}</small></span></span>
+        {rows.map(s => <div className={`tr ${s.removed ? 'removed-row' : ''}`} key={s.id}>
+          <span className="student-cell"><i className="avatar tiny">{initials(s.name)}</i><span><b>{s.name}</b><small>{s.removed ? 'Removed from batch' : s.roll_no}</small></span></span>
           {[0,1,2,3,4].map(i => <span key={i}><StatusDot status={s.statuses[i]} /></span>)}
           <span><b className={s.rate < 75 ? 'risk' : ''}>{s.rate}%</b></span>
         </div>)}

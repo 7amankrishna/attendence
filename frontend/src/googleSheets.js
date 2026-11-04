@@ -131,6 +131,39 @@ function quoteSheetName(name) {
   return `'${name.replace(/'/g, "''")}'`
 }
 
+function columnLabel(index) {
+  let label = ''
+  for (let value = index + 1; value > 0; value = Math.floor((value - 1) / 26)) {
+    label = String.fromCharCode(65 + ((value - 1) % 26)) + label
+  }
+  return label
+}
+
+function rgbColor(colorStyle, legacyColor) {
+  return colorStyle?.rgbColor || legacyColor || null
+}
+
+function isRedColor(color) {
+  if (!color) return false
+  const red = Number(color.red || 0)
+  const green = Number(color.green || 0)
+  const blue = Number(color.blue || 0)
+  return red >= 0.55 && red - green >= 0.1 && red - blue >= 0.1
+}
+
+function indicatesRemoved(format = {}) {
+  const font = format.textFormat || {}
+  const background = rgbColor(format.backgroundColorStyle, format.backgroundColor)
+  const foreground = rgbColor(font.foregroundColorStyle, font.foregroundColor)
+  return Boolean(font.strikethrough || isRedColor(background) || isRedColor(foreground))
+}
+
+async function getFormatRows(spreadsheetId, token, sheetTitle, lastColumn, rowCount) {
+  const range = `${quoteSheetName(sheetTitle)}!A1:${columnLabel(Math.max(lastColumn, 0))}${Math.max(rowCount, 1)}`
+  const data = await apiRequest(`${spreadsheetId}?includeGridData=true&ranges=${encodeURIComponent(range)}`, token)
+  return data.sheets?.[0]?.data?.[0]?.rowData || []
+}
+
 function findHeaderRow(rows) {
   let best = { index: 0, score: -1 }
   rows.slice(0, 12).forEach((row, index) => {
@@ -249,8 +282,21 @@ export async function importStudentsFromSheet(spreadsheetId, token, preferredShe
     throw new Error('Could not detect the student name and a 10-digit System ID/Roll No column.')
   }
 
+  const profileColumnIndexes = [columns.name, columns.systemId, columns.rollNo, columns.email, columns.section]
+    .filter(index => index >= 0)
+  const formatRows = await getFormatRows(
+    spreadsheetId,
+    token,
+    studentsSheet.title,
+    Math.max(...profileColumnIndexes, 0),
+    rows.length
+  ).catch(() => [])
+
   const recentColumns = attendanceColumns.slice(-5)
   const students = rows.slice(headerRowIndex + 1).map((row, index) => {
+    const sheetRowIndex = headerRowIndex + index + 1
+    const formatCells = formatRows[sheetRowIndex]?.values || []
+    const removed = profileColumnIndexes.some(columnIndex => indicatesRemoved(formatCells[columnIndex]?.effectiveFormat || formatCells[columnIndex]?.userEnteredFormat))
     const systemId = columns.systemId >= 0 ? digits(row[columns.systemId]) : ''
     const rollNo = columns.rollNo >= 0 ? digits(row[columns.rollNo]) : ''
     const primaryId = rollNo || systemId
@@ -270,6 +316,7 @@ export async function importStudentsFromSheet(spreadsheetId, token, preferredShe
       section: columns.section >= 0 ? String(row[columns.section] || '').trim() : '',
       batch: columns.batch >= 0 ? String(row[columns.batch] || '').trim() : studentsSheet.title,
       sheet_percentage: columns.percentage >= 0 ? String(row[columns.percentage] || '').trim() : '',
+      removed,
       attendance: { present, absent, excused, total, percentage: total ? Math.round(present / total * 10000) / 100 : 0 },
       recent_statuses: recentColumns.map(column => attendanceStatus(row[column.index]))
     }
