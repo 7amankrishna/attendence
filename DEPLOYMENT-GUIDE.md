@@ -85,13 +85,17 @@ Do not add a trailing slash.
    - `http://localhost:5173`
    - Your Vercel production URL
    - Your InfinityFree HTTPS URL
-6. Add the Client ID to `frontend/.env`:
+6. Add the matching Authorized redirect URIs with a trailing slash:
+   - `http://localhost:5173/`
+   - `https://your-project.vercel.app/`
+   - `https://your-site.infinityfreeapp.com/`
+7. Add the Client ID to `frontend/.env`:
 
 ```env
 VITE_GOOGLE_CLIENT_ID=123456789-real-value.apps.googleusercontent.com
 ```
 
-Do not copy the example literally. It must be the real **Web application** Client ID from Google Cloud. RollFlow also lets you enter this value inside the Connect Google Sheet dialog at runtime.
+Do not copy the example literally. It must be the real **Web application** Client ID from Google Cloud. The Client ID is configured only through the deployment environment and is not entered in the teacher interface.
 
 The student spreadsheet should contain a `Students` tab with these headers:
 
@@ -118,12 +122,13 @@ RollFlow creates/updates an `Attendance` tab. The sixth column stores the common
 
 If your Vercel Root Directory is set to `frontend`, the repository also includes `frontend/vercel.json`. In that case, use the normal commands `npm install` and `npm run build`; do not use `npm install --prefix frontend`, which would incorrectly look for `frontend/frontend/package.json`.
 
-### Google popup troubleshooting
+### Google authorization troubleshooting
 
 - `YOUR_CLIENT_ID.apps.googleusercontent.com` is a placeholder and cannot authenticate.
 - Create a **Web application** OAuth client, not a Desktop client.
 - Add the exact origin displayed by RollFlow, for example `https://your-app.vercel.app`, to **Authorized JavaScript origins**. Do not add a path or trailing page name.
-- Allow popups for your deployed site.
+- RollFlow uses a full-page Google redirect, so popup permission is not required.
+- Add `https://your-domain/` as an Authorized redirect URI as well as `https://your-domain` as an Authorized JavaScript origin.
 - After changing a Vercel environment variable, redeploy because Vite embeds it at build time.
 
 ## Deploy the frontend to InfinityFree

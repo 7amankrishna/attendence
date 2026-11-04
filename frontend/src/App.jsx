@@ -2,11 +2,10 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { api } from './api'
 import { saveThreeCopies } from './syncManager'
 import {
+  consumeGoogleRedirect,
   extractSpreadsheetId,
   importStudentsFromSheet,
-  isGoogleIdentityReady,
-  isValidGoogleClientId,
-  requestGoogleAccess,
+  startGoogleRedirect,
   updateAttendanceSheet
 } from './googleSheets'
 
@@ -62,12 +61,6 @@ function App() {
   const [panel, setPanel] = useState('mark')
   const [sheetModal, setSheetModal] = useState(false)
   const [sheetUrl, setSheetUrl] = useState(localStorage.getItem('rollflow_sheet_url') || '')
-  const [googleClientId, setGoogleClientId] = useState(() => {
-    const saved = localStorage.getItem('rollflow_google_client_id') || ''
-    const configured = import.meta.env.VITE_GOOGLE_CLIENT_ID || ''
-    return isValidGoogleClientId(saved) ? saved : isValidGoogleClientId(configured) ? configured : ''
-  })
-  const [googleReady, setGoogleReady] = useState(isGoogleIdentityReady())
   const [sheetConnection, setSheetConnection] = useState(null)
   const [sheetBusy, setSheetBusy] = useState(false)
   const [sheetError, setSheetError] = useState('')
@@ -77,13 +70,6 @@ function App() {
   const backupQueue = useRef(Promise.resolve())
 
   const pageSize = rows * cols
-
-  useEffect(() => {
-    const ready = () => setGoogleReady(true)
-    window.addEventListener('google-identity-ready', ready)
-    if (isGoogleIdentityReady()) ready()
-    return () => window.removeEventListener('google-identity-ready', ready)
-  }, [])
 
   useEffect(() => {
     async function load() {
@@ -173,16 +159,33 @@ function App() {
     setSheetError('')
     try {
       const spreadsheetId = extractSpreadsheetId(sheetUrl)
-      const token = await requestGoogleAccess(googleClientId)
-      const imported = await importStudentsFromSheet(spreadsheetId, token)
+      localStorage.setItem('rollflow_sheet_url', sheetUrl)
+      startGoogleRedirect(spreadsheetId)
+    } catch (error) {
+      setSheetError(error.message)
+      setSheetBusy(false)
+    }
+  }
+
+  useEffect(() => {
+    let authorization
+    try {
+      authorization = consumeGoogleRedirect()
+    } catch (error) {
+      setSheetModal(true)
+      setSheetError(error.message)
+      return
+    }
+    if (!authorization) return
+
+    setSheetBusy(true)
+    importStudentsFromSheet(authorization.spreadsheetId, authorization.token).then(imported => {
       setSheetConnection({
-        spreadsheetId,
-        token,
+        spreadsheetId: authorization.spreadsheetId,
+        token: authorization.token,
         title: imported.info.title,
         sourceSheet: imported.sourceSheet
       })
-      localStorage.setItem('rollflow_sheet_url', sheetUrl)
-      localStorage.setItem('rollflow_google_client_id', googleClientId.trim())
       setStudents(imported.students)
       setHistory([])
       setDates([])
@@ -193,12 +196,13 @@ function App() {
         title: 'Students imported successfully',
         detail: `${imported.students.length} students imported from “${imported.info.title}”.`
       })
-    } catch (error) {
+    }).catch(error => {
+      setSheetModal(true)
       setSheetError(error.message)
-    } finally {
+    }).finally(() => {
       setSheetBusy(false)
-    }
-  }
+    })
+  }, [])
 
   async function syncGoogleSheet() {
     if (!sheetConnection) {
@@ -358,10 +362,6 @@ function App() {
             <span className="connection-dot" />
             <div><b>{sheetConnection.title}</b><small>Import tab: {sheetConnection.sourceSheet} · Attendance tab: Attendance</small></div>
           </div> : <>
-            <label className="sheet-field">Google Web OAuth Client ID
-              <input value={googleClientId} onChange={e => setGoogleClientId(e.target.value)} placeholder="123456789-abc.apps.googleusercontent.com" autoComplete="off" />
-            </label>
-            <small className="origin-note">Add this exact origin in Google Cloud → Authorized JavaScript origins: <code>{window.location.origin}</code></small>
             <label className="sheet-field">Google Sheet link
               <input value={sheetUrl} onChange={e => setSheetUrl(e.target.value)} placeholder="https://docs.google.com/spreadsheets/d/…" />
             </label>
@@ -382,7 +382,7 @@ function App() {
                 catch (error) { setSheetError(error.message) }
                 finally { setSheetBusy(false) }
               }}>{sheetBusy ? 'Updating…' : 'Update attendance'}</button>
-            </> : <button className="google-btn" disabled={sheetBusy || !sheetUrl.trim() || !isValidGoogleClientId(googleClientId) || !googleReady} onClick={connectSheet}>{sheetBusy ? 'Connecting…' : !googleReady ? 'Loading Google…' : 'Continue with Google'}</button>}
+            </> : <button className="google-btn" disabled={sheetBusy || !sheetUrl.trim()} onClick={connectSheet}>{sheetBusy ? 'Redirecting to Google…' : 'Continue with Google'}</button>}
           </div>
           <small className="privacy-note">RollFlow never receives your Google password. Access is handled by Google OAuth and can be revoked from your Google Account.</small>
         </section>

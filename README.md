@@ -129,7 +129,7 @@ This is suitable for a college project/demo. Before real institutional use, add 
 VITE_GOOGLE_CLIENT_ID=123456789-real-value.apps.googleusercontent.com
 ```
 
-Use your real Web OAuth Client ID. The text `YOUR_CLIENT_ID...` is only an example and will be rejected by the app. You can also paste the Client ID in the Google Sheets connection dialog without rebuilding.
+Use your real Web OAuth Client ID. The text `YOUR_CLIENT_ID...` is only an example and will be rejected by the app. The value is deployment configuration and is not shown as an input in the teacher interface. Google authorization uses a full-page redirect instead of a popup.
 
 Run `npm run build` again after changing the client ID, because Vite places environment values into the compiled frontend.
 

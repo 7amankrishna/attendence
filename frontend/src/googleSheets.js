@@ -1,52 +1,61 @@
 const SHEETS_SCOPE = 'https://www.googleapis.com/auth/spreadsheets'
 const API_BASE = 'https://sheets.googleapis.com/v4/spreadsheets'
 
-export function isValidGoogleClientId(value) {
+function isValidGoogleClientId(value) {
   const clientId = String(value || '').trim()
   return clientId.length > 30 && clientId.endsWith('.apps.googleusercontent.com') && !clientId.includes('YOUR_CLIENT_ID')
 }
 
-function requireClientId(runtimeClientId) {
-  const clientId = String(runtimeClientId || import.meta.env.VITE_GOOGLE_CLIENT_ID || '').trim()
+function requireClientId() {
+  const clientId = String(import.meta.env.VITE_GOOGLE_CLIENT_ID || '').trim()
   if (!isValidGoogleClientId(clientId)) {
-    throw new Error('Enter a real Google Web OAuth Client ID. “YOUR_CLIENT_ID…” is only a placeholder.')
+    throw new Error('Google OAuth is not configured on this deployment. Set VITE_GOOGLE_CLIENT_ID to the real Web OAuth Client ID, then redeploy.')
   }
   return clientId
 }
 
-export function isGoogleIdentityReady() {
-  return Boolean(window.google?.accounts?.oauth2)
+function randomState() {
+  const bytes = new Uint8Array(24)
+  crypto.getRandomValues(bytes)
+  return Array.from(bytes, byte => byte.toString(16).padStart(2, '0')).join('')
 }
 
-function popupErrorMessage(error) {
-  if (error?.type === 'popup_failed_to_open') {
-    return 'Your browser blocked the Google popup. Allow popups for this site, then click Continue with Google again.'
-  }
-  if (error?.type === 'popup_closed') {
-    return 'The Google sign-in popup was closed before permission was granted.'
-  }
-  return error?.message || 'Google sign-in could not be completed.'
-}
+export function startGoogleRedirect(spreadsheetId) {
+  const clientId = requireClientId()
+  const state = randomState()
+  const redirectUri = `${window.location.origin}/`
+  sessionStorage.setItem('rollflow_google_oauth_state', state)
+  sessionStorage.setItem('rollflow_pending_spreadsheet_id', spreadsheetId)
 
-export function requestGoogleAccess(runtimeClientId) {
-  const clientId = requireClientId(runtimeClientId)
-  if (!isGoogleIdentityReady()) {
-    throw new Error('Google Sign-In is still loading. Wait a moment and try again.')
-  }
-  return new Promise((resolve, reject) => {
-    const client = window.google.accounts.oauth2.initTokenClient({
-      client_id: clientId,
-      scope: SHEETS_SCOPE,
-      callback: response => {
-        if (response.error) reject(new Error(response.error_description || response.error))
-        else resolve(response.access_token)
-      },
-      error_callback: error => reject(new Error(popupErrorMessage(error)))
-    })
-    // Keep this call in the original button click stack. Google requires a user
-    // gesture to open the OAuth popup, so do not await timers before this line.
-    client.requestAccessToken({ prompt: 'consent' })
+  const params = new URLSearchParams({
+    client_id: clientId,
+    redirect_uri: redirectUri,
+    response_type: 'token',
+    scope: SHEETS_SCOPE,
+    include_granted_scopes: 'true',
+    prompt: 'consent',
+    state
   })
+  window.location.assign(`https://accounts.google.com/o/oauth2/v2/auth?${params}`)
+}
+
+export function consumeGoogleRedirect() {
+  const hash = new URLSearchParams(window.location.hash.replace(/^#/, ''))
+  const token = hash.get('access_token')
+  const oauthError = hash.get('error')
+  if (!token && !oauthError) return null
+
+  const expectedState = sessionStorage.getItem('rollflow_google_oauth_state')
+  const receivedState = hash.get('state')
+  const spreadsheetId = sessionStorage.getItem('rollflow_pending_spreadsheet_id')
+  sessionStorage.removeItem('rollflow_google_oauth_state')
+  sessionStorage.removeItem('rollflow_pending_spreadsheet_id')
+  window.history.replaceState({}, document.title, `${window.location.pathname}${window.location.search}`)
+
+  if (oauthError) throw new Error(hash.get('error_description') || oauthError)
+  if (!expectedState || receivedState !== expectedState) throw new Error('Google authorization state could not be verified. Please reconnect the Sheet.')
+  if (!spreadsheetId) throw new Error('The pending Google Sheet could not be found. Please reconnect it.')
+  return { token, spreadsheetId }
 }
 
 async function apiRequest(path, token, options = {}) {
