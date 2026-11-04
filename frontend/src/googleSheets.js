@@ -233,7 +233,8 @@ function inferSchema(rows, headerRowIndex) {
 
 export async function importStudentsFromSheet(spreadsheetId, token, preferredSheetId = null) {
   const info = await getSpreadsheetInfo(spreadsheetId, token)
-  const studentsSheet = info.sheets.find(s => Number(s.id) === Number(preferredSheetId)) || info.sheets.find(s => normalized(s.title) === 'students') || info.sheets[0]
+  const availableSheets = info.sheets.filter(sheet => normalized(sheet.title) !== 'attendance')
+  const studentsSheet = availableSheets.find(s => Number(s.id) === Number(preferredSheetId)) || availableSheets.find(s => normalized(s.title) === 'students') || availableSheets[0]
   if (!studentsSheet) throw new Error('The spreadsheet has no sheets to import.')
 
   const range = encodeURIComponent(`${quoteSheetName(studentsSheet.title)}!A:ZZ`)
@@ -279,6 +280,7 @@ export async function importStudentsFromSheet(spreadsheetId, token, preferredShe
   return {
     info,
     students,
+    availableSheets,
     sourceSheet: studentsSheet.title,
     sourceSheetId: studentsSheet.id,
     sections,

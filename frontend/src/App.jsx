@@ -67,9 +67,11 @@ function App() {
   const [successDialog, setSuccessDialog] = useState(null)
   const [autoBackup, setAutoBackup] = useState(true)
   const [syncState, setSyncState] = useState('idle')
+  const [batchBusy, setBatchBusy] = useState(false)
   const [sectionFilter, setSectionFilter] = useState('all')
   const [classInfo, setClassInfo] = useState({ title: 'B.Tech CSE — H(G1)', sections: [] })
   const backupQueue = useRef(Promise.resolve())
+  const batchMarks = useRef({})
 
   const pageSize = rows * cols
 
@@ -171,6 +173,51 @@ function App() {
     }
   }
 
+  function applyImportedBatch(imported, connection) {
+    const batchKey = `${date}:${imported.sourceSheetId}`
+    setSheetConnection({
+      ...connection,
+      title: imported.info.title,
+      sourceSheet: imported.sourceSheet,
+      sourceSheetId: imported.sourceSheetId,
+      availableSheets: imported.availableSheets,
+      detectedColumns: imported.detectedColumns,
+      sections: imported.sections
+    })
+    setStudents(imported.students)
+    setHistory(imported.students.map(student => ({ student_id: student.id, statuses: student.recent_statuses })))
+    setDates(imported.recentLabels)
+    setClassInfo({ title: imported.sourceSheet, sections: imported.sections })
+    setSectionFilter('all')
+    setMarks(batchMarks.current[batchKey] || {})
+    setUndo([])
+    setQuery('')
+    setFilter('all')
+    setPage(0)
+    setDemoMode(true)
+  }
+
+  async function switchBatch(sheetId) {
+    if (!sheetConnection || Number(sheetId) === Number(sheetConnection.sourceSheetId) || batchBusy) return
+    batchMarks.current[`${date}:${sheetConnection.sourceSheetId}`] = marks
+    setBatchBusy(true)
+    setMessage('Loading batch…')
+    try {
+      const imported = await importStudentsFromSheet(sheetConnection.spreadsheetId, sheetConnection.token, sheetId)
+      applyImportedBatch(imported, {
+        spreadsheetId: sheetConnection.spreadsheetId,
+        token: sheetConnection.token
+      })
+      setMessage(`${imported.sourceSheet}: ${imported.students.length} students loaded`)
+      setTimeout(() => setMessage(''), 1800)
+    } catch (error) {
+      setMessage(error.message)
+      setTimeout(() => setMessage(''), 3500)
+    } finally {
+      setBatchBusy(false)
+    }
+  }
+
   useEffect(() => {
     let authorization
     try {
@@ -184,26 +231,13 @@ function App() {
 
     setSheetBusy(true)
     importStudentsFromSheet(authorization.spreadsheetId, authorization.token, authorization.preferredSheetId).then(imported => {
-      setSheetConnection({
+      applyImportedBatch(imported, {
         spreadsheetId: authorization.spreadsheetId,
-        token: authorization.token,
-        title: imported.info.title,
-        sourceSheet: imported.sourceSheet,
-        sourceSheetId: imported.sourceSheetId,
-        detectedColumns: imported.detectedColumns,
-        sections: imported.sections
+        token: authorization.token
       })
-      setStudents(imported.students)
-      setHistory(imported.students.map(student => ({ student_id: student.id, statuses: student.recent_statuses })))
-      setDates(imported.recentLabels)
-      setClassInfo({ title: imported.sourceSheet, sections: imported.sections })
-      setSectionFilter('all')
-      setMarks({})
-      setPage(0)
-      setDemoMode(true)
       setSuccessDialog({
         title: 'Students imported successfully',
-        detail: `${imported.students.length} students imported from “${imported.info.title}”.`
+        detail: `${imported.students.length} students imported from “${imported.sourceSheet}”. You can switch batches without reconnecting.`
       })
     }).catch(error => {
       setSheetModal(true)
@@ -309,6 +343,22 @@ function App() {
         </header>
 
         {message && <div className="toast">{message}</div>}
+
+        {sheetConnection?.availableSheets?.length > 1 && <section className="batch-switcher" aria-label="Google Sheet batches">
+          <div className="batch-switcher-title"><span className="eyebrow">ACTIVE BATCH</span><strong>{sheetConnection.sourceSheet}</strong></div>
+          <div className="batch-tabs" role="tablist" aria-label="Choose a batch">
+            {sheetConnection.availableSheets.map(sheet => <button
+              key={sheet.id}
+              type="button"
+              role="tab"
+              aria-selected={Number(sheet.id) === Number(sheetConnection.sourceSheetId)}
+              className={Number(sheet.id) === Number(sheetConnection.sourceSheetId) ? 'active' : ''}
+              disabled={batchBusy}
+              onClick={() => switchBatch(sheet.id)}
+            >{sheet.title}</button>)}
+          </div>
+          {batchBusy && <span className="batch-loading">Loading…</span>}
+        </section>}
 
         {panel === 'mark' ? <>
           <section className="summary-strip">
